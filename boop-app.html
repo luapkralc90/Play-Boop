@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#FFB5C8">
+<title>Boop!</title>
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiQm9vcCEiLCJzaG9ydF9uYW1lIjoiQm9vcCIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwib3JpZW50YXRpb24iOiJwb3J0cmFpdCIsImJhY2tncm91bmRfY29sb3IiOiIjRkZCNUM4Iiwic3RhcnRfdXJsIjoiLiIsInRoZW1lX2NvbG9yIjoiI0ZGQjVDOCJ9">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;touch-action:none;background:#FFB5C8;font-family:system-ui}
+canvas{position:fixed;top:0;left:0;width:100%;height:100%}
+#splash{position:fixed;inset:0;background:linear-gradient(135deg,#FFB5C8,#B5D4FF);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;transition:opacity 0.5s}
+#splash.hide{opacity:0;pointer-events:none}
+#splash h1{font-size:64px;color:white;text-shadow:0 4px 20px rgba(0,0,0,.15);margin-bottom:8px;letter-spacing:-2px}
+#splash p{font-size:18px;color:rgba(255,255,255,.85);margin-bottom:40px}
+#splash button{background:white;color:#FF4D79;border:none;padding:18px 48px;border-radius:50px;font-size:22px;font-weight:700;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.15);transition:transform .15s}
+#splash button:active{transform:scale(.95)}
+.splash-blob{position:absolute;border-radius:50%;opacity:.3}
+</style>
+</head>
+<body>
+
+<!-- SPLASH SCREEN -->
+<div id="splash">
+  <div class="splash-blob" style="width:120px;height:120px;background:#FF4D79;top:10%;left:10%;animation:float1 3s ease-in-out infinite"></div>
+  <div class="splash-blob" style="width:80px;height:80px;background:#33AAFF;top:15%;right:15%;animation:float2 2.5s ease-in-out infinite"></div>
+  <div class="splash-blob" style="width:100px;height:100px;background:#33DD66;bottom:20%;left:15%;animation:float1 3.5s ease-in-out infinite"></div>
+  <div class="splash-blob" style="width:70px;height:70px;background:#FFCC00;bottom:15%;right:10%;animation:float2 2.8s ease-in-out infinite"></div>
+  <div class="splash-blob" style="width:90px;height:90px;background:#AA55FF;top:50%;left:5%;animation:float1 3.2s ease-in-out infinite"></div>
+  <h1>Boop!</h1>
+  <p>Tap to play ✨</p>
+  <button id="startBtn">Let's Go!</button>
+</div>
+<style>
+@keyframes float1{0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)}}
+@keyframes float2{0%,100%{transform:translateY(0)}50%{transform:translateY(15px)}}
+</style>
+
+<canvas id="c"></canvas>
+
+<script>
+// ============ SPLASH ============
+document.getElementById("startBtn").addEventListener("click", function() {
+  document.getElementById("splash").classList.add("hide");
+  setTimeout(function(){ document.getElementById("splash").style.display="none"; }, 600);
+  startGame();
+});
+
+function startGame() {
+  var c = document.getElementById("c");
+  var ctx = c.getContext("2d");
+  var W = 0, H = 0, running = true;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    c.width = W * dpr; c.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  // ============ AUDIO ============
+  var AC = null;
+  function initAudio() {
+    if (AC) return;
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  }
+
+  // ============ HAPTICS ============
+  function haptic(pattern) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate(pattern); } catch(e) {}
+    }
+  }
+
+  var holdOsc = null, holdGain = null;
+  function startHoldTone() {
+    if (!AC) return;
+    holdOsc = AC.createOscillator();
+    holdGain = AC.createGain();
+    holdOsc.connect(holdGain);
+    holdGain.connect(AC.destination);
+    holdOsc.type = "sine";
+    holdOsc.frequency.setValueAtTime(200, AC.currentTime);
+    holdGain.gain.setValueAtTime(0.15, AC.currentTime);
+    holdOsc.start();
+  }
+  function updateHoldTone(progress) {
+    if (!holdOsc || !AC) return;
+    var freq = 200 + progress * 800;
+    holdOsc.frequency.setValueAtTime(freq, AC.currentTime);
+    if (progress > 0.6) {
+      holdGain.gain.setValueAtTime(0.15 + Math.sin(Date.now() * 0.03) * 0.05, AC.currentTime);
+    }
+  }
+  function stopHoldTone() {
+    if (holdOsc) { try { holdOsc.stop(); } catch(e) {} holdOsc = null; }
+    holdGain = null;
+  }
+
+  function playPop(size) {
+    if (!AC) return;
+    var baseFreq = 600 - size * 2;
+    var osc = AC.createOscillator();
+    var g = AC.createGain();
+    osc.connect(g); g.connect(AC.destination);
+    osc.type = "triangle";
+    var t = AC.currentTime;
+    osc.frequency.setValueAtTime(baseFreq * 2, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.3);
+    g.gain.setValueAtTime(0.35, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.35);
+    osc.start(); osc.stop(t + 0.35);
+    var osc2 = AC.createOscillator();
+    var g2 = AC.createGain();
+    osc2.connect(g2); g2.connect(AC.destination);
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(baseFreq * 3, t);
+    osc2.frequency.exponentialRampToValueAtTime(100, t + 0.2);
+    g2.gain.setValueAtTime(0.15, t);
+    g2.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+    osc2.start(); osc2.stop(t + 0.25);
+  }
+
+  function playBounce() {
+    if (!AC) return;
+    var osc = AC.createOscillator();
+    var g = AC.createGain();
+    osc.connect(g); g.connect(AC.destination);
+    osc.type = "sine";
+    var t = AC.currentTime;
+    var freq = 250 + Math.random() * 200;
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.8, t + 0.04);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.7, t + 0.12);
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc.start(); osc.stop(t + 0.15);
+  }
+
+  function playPeekaboo() {
+    if (!AC) return;
+    var t = AC.currentTime;
+    var notes = [350, 440, 550];
+    for (var i = 0; i < 3; i++) {
+      var osc = AC.createOscillator();
+      var g = AC.createGain();
+      osc.connect(g); g.connect(AC.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(notes[i], t + i * 0.1);
+      g.gain.setValueAtTime(0, t + i * 0.1);
+      g.gain.linearRampToValueAtTime(0.2, t + i * 0.1 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.01, t + i * 0.1 + 0.12);
+      osc.start(t + i * 0.1);
+      osc.stop(t + i * 0.1 + 0.15);
+    }
+  }
+
+  function playCascadeBounce(delay, pitch) {
+    if (!AC) return;
+    setTimeout(function() {
+      var osc = AC.createOscillator();
+      var g = AC.createGain();
+      osc.connect(g); g.connect(AC.destination);
+      osc.type = "triangle";
+      var t = AC.currentTime;
+      osc.frequency.setValueAtTime(pitch, t);
+      osc.frequency.exponentialRampToValueAtTime(pitch * 0.5, t + 0.12);
+      g.gain.setValueAtTime(0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+      osc.start(); osc.stop(t + 0.15);
+    }, delay);
+  }
+
+  // ============ COLORS ============
+  var COLORS = [
+    { h: 340, bg: "#FF4D79", hi: "#FF87A8" },
+    { h: 30,  bg: "#FF9933", hi: "#FFBE73" },
+    { h: 200, bg: "#33AAFF", hi: "#73CCFF" },
+    { h: 130, bg: "#33DD66", hi: "#73EE93" },
+    { h: 270, bg: "#AA55FF", hi: "#CC88FF" },
+    { h: 50,  bg: "#FFCC00", hi: "#FFDD55" },
+    { h: 0,   bg: "#FF3333", hi: "#FF7777" },
+    { h: 170, bg: "#33DDCC", hi: "#77EEDD" },
+  ];
+
+  // ============ PARTICLES ============
+  var particles = [];
+  function burst(x, y, color, count, big) {
+    for (var i = 0; i < count; i++) {
+      var ang = Math.random() * Math.PI * 2;
+      var spd = (big ? 6 : 3) + Math.random() * (big ? 14 : 8);
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - (big ? 6 : 3),
+        r: (big ? 8 : 4) + Math.random() * (big ? 16 : 8),
+        color: color,
+        life: 50 + Math.random() * 40,
+        age: 0,
+        shape: Math.random() < 0.4 ? "star" : "circle",
+        rot: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  // ============ BLOBS ============
+  var blobs = [];
+  var nextId = 0;
+
+  function makeBlob(x, y, fromPop) {
+    var col = COLORS[Math.floor(Math.random() * COLORS.length)];
+    var baseR = 40 + Math.random() * 25;
+    return {
+      id: nextId++,
+      x: x !== undefined ? x : 50 + Math.random() * (W - 100),
+      y: y !== undefined ? y : (fromPop ? -60 : 50 + Math.random() * (H * 0.5)),
+      vx: fromPop ? (Math.random() - 0.5) * 4 : (Math.random() - 0.5) * 2,
+      vy: fromPop ? 2 + Math.random() * 2 : (Math.random() - 0.5) * 2,
+      r: baseR, baseR: baseR, inflateR: baseR,
+      color: col,
+      phase: Math.random() * Math.PI * 2,
+      squishX: 1, squishY: 1, squishVX: 0, squishVY: 0,
+      rot: 0, rotV: 0,
+      eyeScale: 1, mouthOpen: 0, tongueOut: 0, blush: 0,
+      eyeLookX: 0, eyeLookY: 0, expression: 0,
+      held: false, holdTime: 0,
+      popping: false, popT: 0,
+      peeking: false, peekSide: 0, peekProgress: 0, peekTarget: 0,
+      peekTimer: 200 + Math.random() * 600,
+      wiggle: 0, wiggleSpeed: 0.08 + Math.random() * 0.04,
+      age: 0, bounceCount: 0
+    };
+  }
+
+  for (var i = 0; i < 5; i++) blobs.push(makeBlob());
+
+  // ============ TOUCH STATE ============
+  var touches = {};
+
+  function findBlobAt(x, y) {
+    var best = null, bestD = 9999;
+    for (var i = 0; i < blobs.length; i++) {
+      var b = blobs[i];
+      if (b.popping || b.peeking) continue;
+      var dx = x - b.x, dy = y - b.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d < b.inflateR + 25 && d < bestD) { bestD = d; best = b; }
+    }
+    return best;
+  }
+
+  function onTouchStart(x, y, id) {
+    initAudio();
+    var blob = findBlobAt(x, y);
+    if (blob) {
+      blob.held = true; blob.holdTime = 0;
+      blob.expression = 1; blob.eyeScale = 1.4;
+      haptic(15);
+      startHoldTone();
+      touches[id] = { blobId: blob.id, x: x, y: y };
+    } else {
+      touches[id] = { blobId: -1, x: x, y: y };
+      var hitAny = false;
+      for (var j = 0; j < blobs.length; j++) {
+        var b = blobs[j];
+        if (b.popping) continue;
+        var dx = b.x - x, dy = b.y - y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 250 && d > 0) {
+          var force = (250 - d) / 250;
+          b.vx += (dx / d) * force * 15;
+          b.vy += (dy / d) * force * 15 - 4;
+          b.squishX = 0.65; b.squishY = 1.35;
+          b.expression = 1;
+          b.rotV += (Math.random() - 0.5) * 0.4;
+          hitAny = true;
+        }
+      }
+      if (hitAny) { haptic(10); playBounce(); }
+      burst(x, y, COLORS[Math.floor(Math.random() * COLORS.length)].bg, 6, false);
+    }
+  }
+
+  function onTouchEnd(id) {
+    var t = touches[id];
+    if (!t) return;
+    delete touches[id];
+    for (var i = 0; i < blobs.length; i++) {
+      var b = blobs[i];
+      if (b.id === t.blobId && b.held) {
+        b.held = false;
+        if (b.holdTime > 8) {
+          b.popping = true; b.popT = 0;
+          stopHoldTone();
+          haptic([30, 40, 60]);
+          playPop(b.inflateR);
+          var sortedByDist = [];
+          for (var j = 0; j < blobs.length; j++) {
+            if (blobs[j] === b || blobs[j].popping) continue;
+            var dx = blobs[j].x - b.x, dy = blobs[j].y - b.y;
+            sortedByDist.push({ b: blobs[j], d: Math.sqrt(dx * dx + dy * dy), dx: dx, dy: dy });
+          }
+          sortedByDist.sort(function(a, bb) { return a.d - bb.d; });
+          for (var k = 0; k < sortedByDist.length; k++) {
+            var s = sortedByDist[k];
+            if (s.d > 400) break;
+            var delay = k * 80 + 50;
+            var force2 = Math.max(0, (400 - s.d) / 400);
+            (function(blob2, dx2, dy2, d2, force3, del) {
+              setTimeout(function() {
+                if (!running) return;
+                haptic(8);
+                blob2.vx += (dx2 / d2) * force3 * 12;
+                blob2.vy += (dy2 / d2) * force3 * 12 - 5;
+                blob2.squishX = 0.6; blob2.squishY = 1.4;
+                blob2.expression = 1;
+                blob2.rotV += (Math.random() - 0.5) * 0.3;
+              }, del);
+            })(s.b, s.dx, s.dy, s.d, force2, delay);
+            playCascadeBounce(delay, 300 + k * 80);
+          }
+        } else {
+          stopHoldTone();
+          b.vy -= 8; b.squishX = 1.3; b.squishY = 0.7;
+          b.expression = 2; haptic(10); playBounce();
+        }
+        break;
+      }
+    }
+    var anyHeld = false;
+    for (var key in touches) { anyHeld = true; break; }
+    if (!anyHeld) stopHoldTone();
+  }
+
+  c.addEventListener("touchstart", function(e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      onTouchStart(t.clientX, t.clientY, t.identifier);
+    }
+  }, { passive: false });
+  c.addEventListener("touchmove", function(e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      if (touches[t.identifier]) { touches[t.identifier].x = t.clientX; touches[t.identifier].y = t.clientY; }
+    }
+  }, { passive: false });
+  c.addEventListener("touchend", function(e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) { onTouchEnd(e.changedTouches[i].identifier); }
+  }, { passive: false });
+
+  var mouseId = "mouse";
+  c.addEventListener("mousedown", function(e) { onTouchStart(e.clientX, e.clientY, mouseId); });
+  c.addEventListener("mousemove", function(e) { if (touches[mouseId]) { touches[mouseId].x = e.clientX; touches[mouseId].y = e.clientY; } });
+  c.addEventListener("mouseup", function() { onTouchEnd(mouseId); });
+
+  // ============ DRAW FACE ============
+  function drawFace(b) {
+    var r = b.inflateR;
+    var ex = b.expression;
+    var inflate = b.holdTime / 60;
+    var nearTX = W / 2, nearTY = H / 2, nearD = 99999;
+    for (var key in touches) {
+      var t = touches[key];
+      var dx = t.x - b.x, dy = t.y - b.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d < nearD) { nearD = d; nearTX = t.x; nearTY = t.y; }
+    }
+    var lookAng = Math.atan2(nearTY - b.y, nearTX - b.x);
+    var lookDist = Math.min(nearD / 200, 1);
+    b.eyeLookX += (Math.cos(lookAng) * lookDist * 0.35 - b.eyeLookX) * 0.15;
+    b.eyeLookY += (Math.sin(lookAng) * lookDist * 0.35 - b.eyeLookY) * 0.15;
+    var espacing = r * 0.32, eyeY = -r * 0.1;
+    var eyeR = r * 0.18 * b.eyeScale, pupilR = eyeR * 0.5;
+    ctx.fillStyle = "white";
+    ctx.beginPath(); ctx.arc(-espacing, eyeY, eyeR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(espacing, eyeY, eyeR, 0, Math.PI * 2); ctx.fill();
+    if (ex === 3) {
+      ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.05; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-espacing - eyeR * 0.7, eyeY);
+      ctx.quadraticCurveTo(-espacing, eyeY - eyeR * 0.7, -espacing + eyeR * 0.7, eyeY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(espacing - eyeR * 0.7, eyeY);
+      ctx.quadraticCurveTo(espacing, eyeY - eyeR * 0.7, espacing + eyeR * 0.7, eyeY); ctx.stroke();
+      ctx.lineCap = "butt";
+    } else {
+      var px = b.eyeLookX * eyeR, py = b.eyeLookY * eyeR;
+      ctx.fillStyle = "#222";
+      ctx.beginPath(); ctx.arc(-espacing + px, eyeY + py, pupilR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(espacing + px, eyeY + py, pupilR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.7)";
+      ctx.beginPath(); ctx.arc(-espacing + px - pupilR * 0.3, eyeY + py - pupilR * 0.3, pupilR * 0.35, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(espacing + px - pupilR * 0.3, eyeY + py - pupilR * 0.3, pupilR * 0.35, 0, Math.PI * 2); ctx.fill();
+    }
+    if (b.held && inflate > 0.3) {
+      ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.04; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-espacing - eyeR, eyeY - eyeR * 1.2);
+      ctx.lineTo(-espacing + eyeR * 0.3, eyeY - eyeR * 1.5 - inflate * 5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(espacing + eyeR, eyeY - eyeR * 1.2);
+      ctx.lineTo(espacing - eyeR * 0.3, eyeY - eyeR * 1.5 - inflate * 5); ctx.stroke();
+      ctx.lineCap = "butt";
+    }
+    var mouthY = r * 0.22;
+    if (b.held) {
+      if (inflate < 0.3) {
+        ctx.beginPath(); ctx.arc(0, mouthY, r * 0.1, 0, Math.PI * 2);
+        ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.04; ctx.stroke();
+      } else if (inflate < 0.7) {
+        ctx.beginPath(); ctx.arc(0, mouthY, r * 0.08 + inflate * r * 0.15, 0, Math.PI * 2);
+        ctx.fillStyle = "#333"; ctx.fill();
+        ctx.beginPath(); ctx.arc(r * 0.02, mouthY + r * 0.1, r * 0.06, 0, Math.PI);
+        ctx.fillStyle = "#FF6688"; ctx.fill();
+      } else {
+        var wobble = Math.sin(b.age * 0.2) * 3;
+        ctx.beginPath(); ctx.moveTo(-r * 0.2, mouthY + wobble);
+        ctx.quadraticCurveTo(-r * 0.1, mouthY + r * 0.12 + wobble, 0, mouthY + wobble);
+        ctx.quadraticCurveTo(r * 0.1, mouthY - r * 0.08 + wobble, r * 0.2, mouthY + wobble);
+        ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.05; ctx.stroke();
+      }
+    } else if (ex === 1) {
+      ctx.beginPath(); ctx.ellipse(0, mouthY, r * 0.12, r * 0.16, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "#333"; ctx.fill();
+    } else if (ex === 2) {
+      ctx.beginPath(); ctx.moveTo(-r * 0.22, mouthY - r * 0.02);
+      ctx.quadraticCurveTo(0, mouthY + r * 0.18, r * 0.22, mouthY - r * 0.06);
+      ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.05; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(r * 0.05, mouthY + r * 0.12, r * 0.08, r * 0.06, 0.2, 0, Math.PI);
+      ctx.fillStyle = "#FF6688"; ctx.fill();
+    } else if (ex === 3) {
+      ctx.beginPath(); ctx.arc(0, mouthY - r * 0.05, r * 0.22, 0.2, Math.PI - 0.2);
+      ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.05; ctx.stroke();
+      ctx.beginPath(); ctx.arc(-r * 0.4, mouthY - r * 0.05, r * 0.1, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,100,130,.2)"; ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 0.4, mouthY - r * 0.05, r * 0.1, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.arc(0, mouthY - r * 0.03, r * 0.18, 0.15, Math.PI - 0.15);
+      ctx.strokeStyle = "#333"; ctx.lineWidth = r * 0.05; ctx.stroke();
+    }
+  }
+
+  // ============ PEEK-A-BOO ============
+  function startPeek(b) {
+    b.peeking = true; b.peekSide = Math.random() < 0.5 ? -1 : 1;
+    b.peekProgress = 0; b.peekTarget = 0;
+    b.x = b.peekSide === -1 ? -b.baseR * 0.8 : W + b.baseR * 0.8;
+    b.y = H * 0.2 + Math.random() * H * 0.4;
+    b.vx = 0; b.vy = 0; b.expression = 0;
+  }
+
+  // ============ MAIN LOOP ============
+  var tick = 0, bgHue = 0, lastPeekTime = 0;
+
+  function frame() {
+    if (!running) return;
+    tick++; bgHue = (bgHue + 0.15) % 360;
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "hsl(" + bgHue + ",35%,90%)");
+    bg.addColorStop(1, "hsl(" + ((bgHue + 40) % 360) + ",30%,88%)");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+    for (var bg2 = 0; bg2 < 6; bg2++) {
+      var bx = W * (0.1 + bg2 * 0.17) + Math.sin(tick * 0.004 + bg2 * 1.7) * 40;
+      var by = H * 0.4 + Math.cos(tick * 0.003 + bg2 * 2.3) * 50;
+      var br = 25 + Math.sin(tick * 0.006 + bg2) * 8;
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fillStyle = "hsla(" + ((bgHue + bg2 * 55) % 360) + ",35%,82%,.35)"; ctx.fill();
+    }
+
+    for (var i = blobs.length - 1; i >= 0; i--) {
+      var b = blobs[i];
+      b.age++; b.phase += b.wiggleSpeed;
+
+      if (b.popping) {
+        b.popT++;
+        b.inflateR = b.baseR * (1 + b.holdTime / 60) * (1 + b.popT * 0.12);
+        b.squishX = 1 + b.popT * 0.05; b.squishY = 1 + b.popT * 0.05;
+        if (b.popT > 7) {
+          burst(b.x, b.y, b.color.bg, 20 + Math.floor(b.holdTime / 3), true);
+          burst(b.x, b.y, b.color.hi, 10, true);
+          blobs.splice(i, 1);
+          for (var sc = 0; sc < 2; sc++) {
+            (function(delay) {
+              setTimeout(function() {
+                if (running && blobs.length < 10) { blobs.push(makeBlob(Math.random() * (W - 100) + 50, -60, true)); playBounce(); }
+              }, 300 + delay * 200);
+            })(sc);
+          }
+          continue;
+        }
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.globalAlpha = 1 - b.popT / 7;
+        ctx.scale(b.squishX, b.squishY);
+        ctx.beginPath(); ctx.arc(0, 0, b.inflateR, 0, Math.PI * 2);
+        ctx.fillStyle = b.color.bg; ctx.fill();
+        drawFace(b); ctx.globalAlpha = 1; ctx.restore();
+        continue;
+      }
+
+      if (b.peeking) {
+        b.peekTimer--;
+        if (b.peekTimer < 0) {
+          if (b.peekTarget === 0) { b.peekTarget = 1; b.peekTimer = 80 + Math.random() * 60; playPeekaboo(); }
+          else { b.peeking = false; b.vx = b.peekSide * -4; b.vy = -3; b.expression = 3; }
+        }
+        var target = b.peekTarget === 1 ?
+          (b.peekSide === -1 ? b.baseR * 0.4 : W - b.baseR * 0.4) :
+          (b.peekSide === -1 ? -b.baseR * 0.5 : W + b.baseR * 0.5);
+        b.x += (target - b.x) * 0.06; b.y += Math.sin(b.phase) * 0.3;
+        ctx.save(); ctx.translate(b.x, b.y);
+        ctx.rotate(Math.sin(b.phase * 2) * 0.05);
+        ctx.beginPath(); ctx.arc(0, 0, b.baseR, 0, Math.PI * 2);
+        ctx.fillStyle = b.color.bg; ctx.fill();
+        ctx.beginPath(); ctx.arc(-b.baseR * 0.2, -b.baseR * 0.25, b.baseR * 0.3, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,.2)"; ctx.fill();
+        b.inflateR = b.baseR;
+        if (b.peekTarget === 1) { b.expression = 0; drawFace(b); }
+        ctx.restore(); continue;
+      }
+
+      if (b.held) {
+        b.holdTime++;
+        var inflate = Math.min(b.holdTime / 60, 1.5);
+        b.inflateR = b.baseR * (1 + inflate * 0.6);
+        updateHoldTone(inflate / 1.5);
+        b.wiggle = Math.sin(b.age * 0.15) * inflate * 4;
+        if (inflate > 0.7) b.eyeScale = 1.4 + (inflate - 0.7) * 1.5;
+        if (inflate > 0.3) b.expression = 4;
+        b.vx *= 0.9; b.vy *= 0.9;
+        var tch = touches[Object.keys(touches).find(function(k) { return touches[k].blobId === b.id; })];
+        if (tch) { b.x += (tch.x - b.x) * 0.03; b.y += (tch.y - b.y) * 0.03; }
+      } else {
+        b.inflateR += (b.baseR - b.inflateR) * 0.1;
+        b.eyeScale += (1 - b.eyeScale) * 0.1;
+        b.holdTime = Math.max(0, b.holdTime - 2);
+        if (b.age % 120 === 0) b.expression = Math.random() < 0.6 ? 0 : 3;
+      }
+
+      if (!b.held) { b.vy += 0.18; b.x += b.vx; b.y += b.vy; b.rot += b.rotV; b.rotV *= 0.97; }
+
+      b.squishVX += (1 - b.squishX) * 0.15; b.squishVY += (1 - b.squishY) * 0.15;
+      b.squishVX *= 0.7; b.squishVY *= 0.7;
+      b.squishX += b.squishVX; b.squishY += b.squishVY;
+
+      var br2 = b.inflateR;
+      if (b.x < br2) { b.x = br2; b.vx = Math.abs(b.vx) * 0.7; b.squishX = 0.7; b.squishY = 1.3; b.rotV += 0.06; }
+      if (b.x > W - br2) { b.x = W - br2; b.vx = -Math.abs(b.vx) * 0.7; b.squishX = 0.7; b.squishY = 1.3; b.rotV -= 0.06; }
+      if (b.y > H - br2) {
+        b.y = H - br2;
+        var wasMoving = Math.abs(b.vy) > 2;
+        b.vy = -Math.abs(b.vy) * 0.6;
+        b.squishY = 0.65; b.squishX = 1.35;
+        if (wasMoving) { b.bounceCount++; playBounce(); }
+        if (Math.abs(b.vy) < 2) b.vy = -(4 + Math.random() * 3);
+      }
+      if (b.y < br2) { b.y = br2; b.vy = Math.abs(b.vy) * 0.5; b.squishY = 1.3; b.squishX = 0.7; }
+
+      for (var j = i + 1; j < blobs.length; j++) {
+        var b2 = blobs[j];
+        if (b2.popping || b2.peeking) continue;
+        var dx = b2.x - b.x, dy = b2.y - b.y;
+        var dd = Math.sqrt(dx * dx + dy * dy);
+        var minD = b.inflateR + b2.inflateR;
+        if (dd < minD && dd > 0) {
+          var nx = dx / dd, ny = dy / dd, ov = minD - dd;
+          b.x -= nx * ov * 0.5; b.y -= ny * ov * 0.5;
+          b2.x += nx * ov * 0.5; b2.y += ny * ov * 0.5;
+          var dot = (b.vx - b2.vx) * nx + (b.vy - b2.vy) * ny;
+          b.vx -= nx * dot * 0.4; b.vy -= ny * dot * 0.4;
+          b2.vx += nx * dot * 0.4; b2.vy += ny * dot * 0.4;
+          b.squishX = 0.8; b.squishY = 1.2; b2.squishX = 0.8; b2.squishY = 1.2;
+          if (Math.random() < 0.2) { b.expression = 1; b2.expression = 1; playBounce(); }
+        }
+      }
+
+      if (!b.held && Math.random() < 0.003) {
+        b.vy -= 6 + Math.random() * 5; b.vx += (Math.random() - 0.5) * 8; b.expression = 2;
+      }
+
+      ctx.save(); ctx.translate(b.x, b.y);
+      ctx.rotate(b.rot + Math.sin(b.phase) * 0.06);
+      ctx.scale(b.squishX, b.squishY);
+      ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      var shadowY2 = H - 4;
+      var shadowAlpha = Math.max(0, 0.12 * (1 - (shadowY2 - b.y) / H));
+      ctx.beginPath(); ctx.ellipse(b.x, shadowY2, b.inflateR * 0.7, b.inflateR * 0.1, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0," + shadowAlpha + ")"; ctx.fill(); ctx.restore();
+      ctx.beginPath(); ctx.arc(0, 0, b.inflateR, 0, Math.PI * 2);
+      ctx.fillStyle = b.color.bg; ctx.fill();
+      ctx.beginPath(); ctx.arc(-b.inflateR * 0.22, -b.inflateR * 0.28, b.inflateR * 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.fill();
+      if (b.held && b.holdTime > 15) {
+        var wobbleR = b.inflateR + Math.sin(b.age * 0.2) * 3;
+        ctx.beginPath(); ctx.arc(0, 0, wobbleR + 2, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.lineWidth = 2; ctx.stroke();
+      }
+      drawFace(b); ctx.restore();
+    }
+
+    for (var pi = particles.length - 1; pi >= 0; pi--) {
+      var p = particles[pi];
+      p.age++; p.x += p.vx; p.y += p.vy; p.vy += 0.25; p.vx *= 0.98; p.rot += 0.1;
+      var pA = 1 - p.age / p.life;
+      if (pA <= 0) { particles.splice(pi, 1); continue; }
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = pA;
+      if (p.shape === "star") {
+        ctx.beginPath();
+        for (var si = 0; si < 5; si++) {
+          var sa = si * Math.PI * 2 / 5 - Math.PI / 2;
+          ctx.lineTo(Math.cos(sa) * p.r, Math.sin(sa) * p.r);
+          var ia = sa + Math.PI / 5;
+          ctx.lineTo(Math.cos(ia) * p.r * 0.4, Math.sin(ia) * p.r * 0.4);
+        }
+        ctx.closePath(); ctx.fillStyle = p.color; ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.arc(0, 0, p.r * (0.4 + pA * 0.6), 0, Math.PI * 2);
+        ctx.fillStyle = p.color; ctx.fill();
+      }
+      ctx.globalAlpha = 1; ctx.restore();
+    }
+
+    if (tick - lastPeekTime > 400 && blobs.length >= 3 && Math.random() < 0.005) {
+      var candidates = [];
+      for (var ci = 0; ci < blobs.length; ci++) {
+        if (!blobs[ci].held && !blobs[ci].popping && !blobs[ci].peeking) candidates.push(blobs[ci]);
+      }
+      if (candidates.length > 0) { startPeek(candidates[Math.floor(Math.random() * candidates.length)]); lastPeekTime = tick; }
+    }
+
+    if (blobs.length < 3) {
+      blobs.push(makeBlob(Math.random() * (W - 100) + 50, -60, true));
+      blobs.push(makeBlob(Math.random() * (W - 100) + 50, -60, true));
+    }
+    if (blobs.length > 12) blobs.splice(0, blobs.length - 10);
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
+</script>
+</body></html>
